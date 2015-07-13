@@ -47,7 +47,7 @@ class Apriori():
         return occur_itemset
 
     def genFrequentItemset(self, sc):
-        data = sc.textFile(self.data_path).map(lambda x: x.split(self.sep)[1:])
+        data = sc.textFile(self.data_path).map(lambda x: x.split(',')[1:])
         data.cache()
         iteration = 1
         # generate 1-frequent itemset
@@ -60,23 +60,44 @@ class Apriori():
         while notConverged:
             iteration += 1
             candidates = self.genCandidate(itemset_k).collect()
-            print candidates
-            itemset_new = data.flatMap(lambda x: self.occur(x, candidates)).map(lambda x: (x, 1)).reduceByKey(operator.add)
-            print itemset_new.collect()
-            itemset_new = itemset_new.filter(lambda x: x[1] >= self.min_support)
-            print itemset_new.collect()
+            itemset_new = data.flatMap(lambda x: self.occur(x, candidates)).map(lambda x: (x, 1)).reduceByKey(operator.add).filter(lambda x: x[1] >= self.min_support)
             if itemset_new.count() > 0:
                 itemset_new.saveAsTextFile(self.frequent_output + str(iteration))
             else:
                 notConverged = False
             itemset_k = itemset_new.map(lambda x: x[0])
 
+    def genRuleCandidates(self, pair):
+        items = pair[0].split(self.sep)
+        n = len(items)
+        freq = pair[1]
+        ruleCandidates = []
+        masks = [1<<j for j in xrange(n)]
+        for i in xrange(1, 2**n-1):
+            ruleCandidates.append(("".join([str(items[j])+'-' for j in range(n) if (masks[j] & i)]))[:-1])
+        ruleTriples = []
+        for condition in ruleCandidates:
+            ruleTriples.append((condition, pair[0], freq))
+        return ruleTriples
+
+    def genAssociationRules(self, sc):
+        # read all generated frequent itemsets
+        frequent_itemsets = sc.textFile(self.frequent_output+"[0-9]*").map(lambda x: x.replace('(', '').replace(')', '').replace('u', '').replace('\'', '').replace(' ', '')).map(lambda x: (x.split(',')[0], int(x.split(',')[1])))
+        itemset_freq_pairs = {}
+        for itemset_freq in frequent_itemsets.collect():
+            itemset_freq_pairs[itemset_freq[0]] = itemset_freq[1]
+        # generate association rules candidates
+        ruleCandidates = frequent_itemsets.filter(lambda x: len(x[0].split(self.sep))>1).flatMap(lambda x: self.genRuleCandidates(x))
+        rules = ruleCandidates.map(lambda x: (x[0], x[1], itemset_freq_pairs[x[0]], x[2]/float(itemset_freq_pairs[x[0]])))
+        print rules.collect()
+
 if __name__ == '__main__':
     data_path = "/user/liangting/demo/apriori/1000-out1.csv"
     frequent_output = "/user/liangting/demo/apriori/frequent_itemsets/"
-    min_support = 40
+    min_support = 30
     min_confidence = 0.8
     sc = SparkContext("local", "Simple App")
-    apriori_model = Apriori(data_path, frequent_output, min_support, min_confidence, ",")
+    apriori_model = Apriori(data_path, frequent_output, min_support, min_confidence, "-")
     apriori_model.genFrequentItemset(sc)
+    apriori_model.genAssociationRules(sc)
     sc.stop()
