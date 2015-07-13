@@ -88,7 +88,8 @@ class Apriori():
             itemset_freq_pairs[itemset_freq[0]] = itemset_freq[1]
         # generate association rules candidates
         ruleCandidates = frequent_itemsets.filter(lambda x: len(x[0].split(self.sep))>1).flatMap(lambda x: self.genRuleCandidates(x))
-        rules = ruleCandidates.map(lambda x: (x[0], x[1], itemset_freq_pairs[x[0]], x[2]/float(itemset_freq_pairs[x[0]])))
+        # rule triple:(condition items, items, confidence), rule: condition items --> items - condition items
+        rules = ruleCandidates.map(lambda x: (x[0], x[1], x[2]/float(itemset_freq_pairs[x[0]]))).filter(lambda x: x[2] >= self.min_confidence)
         print rules.collect()
 
 if __name__ == '__main__':
